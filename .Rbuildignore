@@ -1,0 +1,15 @@
+^renv$
+^renv\.lock$
+^devtools_history\.R$
+^AMOPLS\.Rproj$
+^\.Rproj\.user$
+^packrat/
+^\.Rprofile$
+^data-raw$
+^Readme_source/
+^packrat$
+^README_cache/
+^README.Rmd
+^cran-comments.md
+^doc$
+^Meta$

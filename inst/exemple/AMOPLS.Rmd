@@ -1,0 +1,349 @@
+---
+title: "20181218_Projet1"
+author: "Baptiste Jolivet"
+date: "December 18th 2018"
+output: html_document
+---
+
+
+
+## Packages  
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# pacman::p_load(
+#   knitr,
+#   rmarkdown,
+#   kopls,
+#   testthat,
+#   usethis,
+#   roxygen2,
+#   packrat,
+#   pracma,
+#   magrittr,
+#   data.table,
+#   ggplot2,
+#   plyr,
+#   ggrepel,
+#   ggpubr,
+#   progress)
+ggplot2::theme_set(theme_bw())
+```
+
+## Dataset 1 : J. Boccard et al. (2016) : Fisher rats - SCALING = FALSE 
+```{r}
+pacman::p_load(rAMOPLS, ggplot2, magrittr, data.table)
+
+Data <- list("dataset" = as.matrix(liver.toxicity$gene), 
+             "factors" = as.matrix(data.table(liver.toxicity$treatment)[, .(Dose = Dose.Group, Time = Time.Group)]))
+
+Perm_Results <- fun_Permutations_new(
+  Data = Data,
+  equation.elements = "1,2,12",
+  scaling = F,
+  nb_perm = 100,
+  nb_compo_orthos = 1,
+  parallel = 3
+)
+Results <- Perm_Results[[1]]
+temp <- fun_AMOPLS_summary(Results, type = "All")
+temp[order(as.numeric(Effect))]
+
+## Check pvalue iteration
+temp_data <- Results$outputs$Permutation_result$details
+temp_res <- lapply(1:temp_data[, max(PermI)], function(x) {
+  # x <- 3
+  temp_dt <- temp_data[PermI %in% 1:x]
+  setkey(temp_dt, Effect)
+  temp_ori <- fun_AMOPLS_summary(Results, type = "All")[, .(Effect, RSS, RSR)]
+  setkey(temp_ori, Effect)
+  temp_dt[temp_ori][, {
+    RSR_n <- length(which(RSR >= i.RSR)) ;
+    RSS_n <- length(which(RSS >= i.RSS)) ;
+    list(
+      "Nb_perm" = x,
+      "RSR p-value" = RSR_n/.N,
+      "RSS p-value" = RSS_n/.N
+    )
+  }, by = .(Effect)]
+}) %>% rbindlist(use.names = T)
+
+temp_res %>%
+  melt(id.vars = c("Effect", "Nb_perm")) %>%
+  ggplot(., aes(Nb_perm, value, color = Effect)) +
+  geom_line(alpha = 0.5) +
+  geom_point(alpha = 0.5) +
+  facet_grid(variable~., scale = "free_y")
+
+
+## Score plots
+fun_plot_optimal_scores(Results)
+fun_plot_optimal_loadings(Results)
+fun_plot_VIPs(Results, debugL = F)
+```
+
+```{r, eval = F}
+pacman::p_load(rAMOPLS, ggplot2, magrittr, data.table)
+
+Data <- list("dataset" = as.matrix(liver.toxicity$gene), 
+             "factors" = as.matrix(data.table(liver.toxicity$treatment)[, .(Dose = Dose.Group, Time = Time.Group)]))
+
+## AMOPLS model :
+Results <- fun_AMOPLS(Data = Data,
+                      equation.elements = "1,2,12",
+                      scaling = FALSE,
+                      only.means.matrix = FALSE,
+                      use.previous.model = NULL,
+                      Nb_compo_ortho = 1,
+                      perm_t = NULL)
+
+# ## Score plots
+fun_plot_optimal_scores(Results)
+fun_plot_optimal_loadings(Results)
+fun_plot_VIPs(Results, debugL = F)
+
+## Publication plot
+ggpubr::ggarrange(
+  fun_score_plot(Results,'Dose', 1, 7),
+  fun_score_plot(Results,'Time',  2, 4),
+  ncol = 2, nrow = 1)
+
+##
+dt_val <- data.table("Effect" = names(Results$outputs$SSQ),
+                     (unlist(t(Results$outputs$RSS))*100) %>% formatC(., digits = 1, format = "f"),
+                     t(Results$outputs$RSR) %>% formatC(., digits = 2, format = "f"))
+setnames(dt_val, c("Effect", "RSS", "RSR"))
+## Components
+cp <- data.table(Results$outputs$block_saliences_norm %>% formatC(., digits = 2, format = "f"))
+cp %>% {setnames(., c(paste0("tp", 1:(ncol(.)-1)), "to"))}
+
+
+## Add permutation signif
+Perm_Results <- fun_Permutations_new(
+  Data = Data,
+  equation.elements = "1,2,12",
+  scaling = F,
+  nb_perm = 25, 
+  nb_compo_orthos = 1
+)
+
+dt_pval <- data.table("RSS_pval" = unlist(Perm_Results$RSS_pval_results),
+                      "RSR_pval" = unlist(Perm_Results$RSR_pval_results))
+
+cbind(dt_val, dt_pval, cp)
+```
+
+## Dataset 1bis: Boccard et al. (2016) - A. thaliana metabolomic profiles
+```{r, eval = F}
+pacman::p_load(rAMOPLS, ggplot2, magrittr, data.table)
+
+Data <- list("dataset" = as.matrix(data_Boccard2016$datamatrix[, -1]), 
+             "factors" = as.matrix(data_Boccard2016$samplemetadata[, c(2,3)]))
+
+## AMOPLS model :
+Results <- fun_AMOPLS(Data = Data,
+                      equation.elements = "1,2",
+                      scaling = TRUE,
+                      only.means.matrix = FALSE,
+                      use.previous.model = NULL,
+                      Nb_compo_ortho = 1,
+                      Perm = FALSE, 
+                      perm_t = '')
+
+fun_plot_optimal_scores(Results)
+fun_plot_optimal_loadings(Results)
+fun_plot_VIPs(Results, debugL = F)
+
+## Publication plot
+rAMOPLS::fun_score_plot(Results, Results$general$factor_names[2], t_1 = 2, t_2 = 3)
+rAMOPLS::fun_score_plot(Results, Results$general$factor_names[1], t_1 = 1, t_2 = 2)
+```
+
+
+## Dataset 2 : V. Ruiz et al. (2017) : neural cell cultures - SCALING = TRUE 
+```{r, eval = F}
+Data <- list(
+  "dataset" = as.matrix(data_Ruiz[,c(-1:-3)]), 
+  "factors" = as.matrix(data_Ruiz[,c(2,3)])
+)
+
+## Note: There are 2 duplicated variables in Ruiz dataset (change names)
+ind_change <- colnames(Data$dataset) %>% {which(duplicated(.))}
+lapply(ind_change, function(x) {
+  colnames(Data$dataset)[x] <<- paste0(colnames(Data$dataset)[x], "_2")
+})
+
+## Perform AMOPLS
+# Results <- fun_AMOPLS(
+#   Data = Data, 
+#   equation.elements = "1,2,12",
+#   scaling = TRUE, 
+#   only.means.matrix = FALSE, 
+#   use.previous.model = NULL, 
+#   Nb_compo_ortho = 1, 
+#   Perm = FALSE,
+#   perm_t = ''
+# )
+
+## AMOPLS with permutation
+Perm_Results <- fun_Permutations_new(
+  Data = Data,
+  equation.elements = "1,2,12",
+  scaling = T,
+  nb_perm = 1000, 
+  nb_compo_orthos = 1,
+  parallel = 3
+)
+
+Results <- Perm_Results[[1]]
+temp <- fun_AMOPLS_summary(Results, type = "All")
+temp[order(as.numeric(Effect))]
+# ## Score plots (cf V.Ruiz et al. - 2017) : à ajuster
+fun_plot_optimal_scores(Results)
+fun_plot_optimal_loadings(Results)
+fun_plot_VIPs(Results, main_factor = "Dose")
+
+```
+
+## Dataset 3 : For unbalanced data 
+```{r, eval = F}
+Data <- list(
+  "dataset" = as.matrix(liver.toxicity$gene),
+  "factors" = as.matrix(liver.toxicity$treatment[c("Time.Group","Dose.Group")])
+)
+
+## Check number of samples by groups
+temp_factors <- Data$factors %>% as.data.table(keep.rownames = T)
+temp_factors %>% {.[, .N, by = names(.[, -1])]}
+
+## Artificially unbalance the groups
+unbalanced_factors <- temp_factors %>% {.[, lapply(.SD, function(x) {sample(rn, sample(2:4, 1))}), by = names(.[, -1])]}
+setcolorder(unbalanced_factors, c("rn", names(unbalanced_factors[, -"rn"])))
+## Check
+unbalanced_factors %>% {.[, .N, by = names(.[, -1])]}
+
+## Change de input data
+line_indice_to_keep <- temp_factors[, which(rn %in% unbalanced_factors$rn)]
+Data_unbalanced <- lapply(Data, function(x) {
+  x[line_indice_to_keep, ]
+})
+
+Results_outputs_subsets <- {} 
+
+# Male n_iteration iteration within the data
+n_iteration <- 20
+pb <- progress::progress_bar$new(format = "[:bar] Iteration: :current/:total (:eta)", total = n_iteration)
+pb$tick(0)
+
+Results_outputs_subsets <- lapply(1:n_iteration, function(x) {
+  pb$tick(1)
+  Data_balanced <- fun_balance(Data_unbalanced)
+  output <- fun_AMOPLS(
+    Data = Data_balanced, 
+    equation.elements = "1,2,12", 
+    scaling = FALSE, 
+    only.means.matrix = FALSE, 
+    use.previous.model = NULL, 
+    Nb_compo_ortho = 1,
+    Perm = FALSE,
+    perm_t = '')$outputs
+  return(output)
+})
+
+Results_averaged <- fun_average_outputs(Results_outputs_subsets, nb_sub_samples)
+```
+
+## Dataset 4 : CONFIDENTIAL !
+```{r}
+Data <- list(
+  "dataset" = data_sample$datamatrix[, -1], 
+  "factors" = data_sample$samplemetadata[, -1]
+)
+
+## Remove column with NA
+col_to_remove <- which(Data$dataset[, lapply(.SD, function(x) {any(is.na(x))})] == T)
+Data$dataset <- Data$dataset[, -col_to_remove, with = F]
+
+Data <- lapply(Data, as.matrix)
+## Perform AMOPLS
+Results <- fun_AMOPLS(
+  Data = Data, 
+  equation.elements = "1,2,3,12,13,23",
+  scaling = TRUE,
+  only.means.matrix = FALSE, 
+  use.previous.model = NULL, 
+  Nb_compo_ortho = 1, 
+  Perm = FALSE,
+  perm_t = ''
+)
+
+# ## Score plots (cf V.Ruiz et al. - 2017) : à ajuster
+fun_plot_optimal_scores(Results)
+fun_plot_optimal_loadings(Results)
+fun_plot_VIPs(Results, main_factor = "class x trt", VIP_nb = 25)
+```
+
+
+### Part II : Plots
+
+
+## Block saliences   
+```{r, eval = F}
+# max of the plot sur les Bloc saliences
+Bloc_saliences <- data.frame(cbind(c(Results$general$factor_names,'Residuals'),Results$outputs$block_saliences))
+colnames(Bloc_saliences)[1] <- 'Factor'
+dat1 <- melt(data = Bloc_saliences, id.vars = 'Factor')
+
+# A bar graph
+ggplot(data = dat1, aes(x=variable, y=value, fill=Factor)) +
+  geom_bar(colour="black", stat="identity",
+           position=position_dodge(),
+           size=.3) +                   
+  xlab('Component') + ylab("Block salience") +
+  scale_x_discrete(breaks=unique(dat1[,2]), labels= c(fun_rep_str('tp',Results$general$Nb_compo_pred),fun_rep_str('to',1))) + # Set axis labels
+  ggtitle("Block salience for each component") +
+  theme(legend.position = c(0.94, 0.89), axis.text.y = element_blank(), axis.ticks = element_blank())
+```
+
+### Part III : Permutation tests 
+
+## Config. 1 
+```{r, eval = F}
+### Config. 1 : Etude en fonction du nombre de permutations, nb_compo fixé (unique ou multiple - cf exemple) :
+## Problem in permutation ! sometimes it returns an error aq Q is not a matrix, but sometimes not
+Perm_Results <- fun_Permutations(
+  Results = Results,
+  Data = list("dataset" = Results$general$data, "factors" = Results$general$factors),
+  equation.elements = "1,2,12",
+  scaling = F,
+  nb_perm = 25, 
+  nb_compo_orthos = 1
+)
+
+data.table("RSR p-value" = unlist(Perm_Results$RSR_pval_results), "RSS p-value" = unlist(Perm_Results$RSS_pval_results), "R2Y p-value" = unlist(Perm_Results$R2Y_pval_results))
+```
+
+
+# Table of results - scores + p-values 
+```{r, eval = F}
+
+# Residual Structure Ratio (RSR) + Relative Sum of Squares (RSS) :
+
+
+RSR <- t(Results$outputs$RSR)
+RSS <- t(Results$outputs$RSS)
+SSQ <- t(Results$outputs$SSQ)
+
+colnames(RSR) <- 'RSR'
+colnames(RSS) <- 'RSS'
+colnames(SSQ) <- 'SSQ'
+
+Table <- as.data.table(cbind(c(Results$general$factor_names,'Residuals'), RSR, RSS, SSQ))
+colnames(Table)[1] <- 'Factor'
+
+# Exportation of the results (.PDF) :
+#export::table2tex(Table,"./Scores.tex", digits = 2)
+
+```
+
+

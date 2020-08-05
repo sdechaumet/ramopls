@@ -1,0 +1,38 @@
+Package: rAMOPLS
+Title: rAMOPLS: Perform ANOVA-Multiblock Orthogonal Partial Least Square Analysis
+Version: 0.2
+Authors@R: c(
+    person("Sylvain", "Dechaumet", email = "sylvain.dechaumet@medday-pharma.com", role = c("aut", "cre")),
+    person("Julien", "Boccard", email = "Julien.Boccard@unige.ch", role = c("aut", "rev")),
+    person("Baptiste", "Jolivet", email = "baptiste.jolivet@mines-paristech.fr", role = c("aut", "ctr")))
+Description: A tool to perform AMOPLS analysis as described by Boccard et al., 2016 with balanced and unbalanced groups using the subsampling strategy described by Gonzalez et al., 2017.
+Depends: 
+    R (>= 3.5.0),
+    data.table,
+    magrittr
+License: file LICENSE
+Encoding: UTF-8
+LazyData: true
+Suggests: 
+    knitr,
+    rmarkdown,
+    testthat (>= 2.1.0),
+    usethis,
+    roxygen2,
+    kopls,
+    devtools,
+    zip,
+    graphics
+VignetteBuilder: knitr
+Imports: 
+    ggplot2,
+    ggrepel,
+    ggpubr,
+    progress,
+    stats
+RoxygenNote: 7.1.0
+Enhances: 
+    future,
+    furrr,
+    logger,
+    covr

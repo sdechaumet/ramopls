@@ -1,0 +1,12 @@
+inst/doc
+.Rproj.user
+packrat/lib*/
+packrat/src/
+man/*
+packrat/*
+!packrat/packrat.lock
+.Rproj
+README_cache/*
+renv/*
+doc
+Meta
