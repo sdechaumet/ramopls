@@ -30,8 +30,6 @@ install_kopls <- function(...) {
          call. = FALSE)
   }
 
-  if (!dir.exists("C:/Rtools")) {stop("You need to install Rtools: https://cran.r-project.org/bin/windows/Rtools/")}
-
   Sys.setenv(PATH = paste("C:/Rtools/bin", Sys.getenv("PATH"), sep=";"))
   Sys.setenv(BINPREF = "C:/Rtools/mingw_$(WIN)/bin/")
 
