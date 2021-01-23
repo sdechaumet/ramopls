@@ -30,7 +30,7 @@ Imports:
     ggpubr,
     progress,
     stats
-RoxygenNote: 7.1.0
+RoxygenNote: 7.1.1
 Enhances: 
     future,
     furrr,
