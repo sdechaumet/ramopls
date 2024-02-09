@@ -17,27 +17,24 @@ utils::globalVariables(c("."))
 #' This function try to install the kopls package from rAMOPLS.
 #' It needs Rtools and devtools to run
 #'
-#' @param ... Argument passed to install
+#' @importFrom renv install
 #'
 #' @examples
 #' install_kopls()
 #'
 #' @export
-install_kopls <- function(...) {
+install_kopls <- function() {
   ## Check Rtools env
-  if (!requireNamespace("devtools", quietly = TRUE)) {
-    stop("Package \"devtools\" needed for this function to work, please install it using install.packages('devtools').",
+  if (!requireNamespace("renv", quietly = TRUE)) {
+    stop("Package \"renv\" needed for this function to work, please install it using install.packages('renv').",
          call. = FALSE)
   }
-
-  Sys.setenv(PATH = paste("C:/Rtools/bin", Sys.getenv("PATH"), sep=";"))
-  Sys.setenv(BINPREF = "C:/Rtools/mingw_$(WIN)/bin/")
 
   ## Unzip package in temporary folder
   temp_dir_path <- tempdir()
   zip::unzip(file.path(system.file("package", package = "rAMOPLS"), "kopls.zip"), exdir = temp_dir_path)
   ## Install from unzipped temporary folder
-  devtools::install(temp_dir_path, quick = T, ...)
+  renv::install(temp_dir_path, prompt = FALSE)
   ## Remove temporary folder
   unlink(temp_dir_path)
 
@@ -1221,7 +1218,7 @@ run_AMOPLS <- function(datamatrix,
   if (debug) {logger::log_info("Calculate full model for {length(nb_compo_orthos)} orthogonal components: ")}
 
   res_subsampling <- lapply(1:subsampling, function(zrf) {
-    # zrf <- 1
+    # zrf <- subsampling[1]
     ## Balance the data only if subsampling is > 1
     if (subsampling > 1) {
       message("Run sub-sampling: ", zrf)
@@ -1277,7 +1274,7 @@ run_AMOPLS <- function(datamatrix,
       }
 
       temp <- furrr::future_map(1:apply_it, function(x) {
-        # x <- 1
+        # x <- apply_it[1]
         temp_effect <- iter_template[Iter == x, Effect]
         temp_ortho <- iter_template[Iter == x, Ortho]
         P_Results <- fun_temp_perm(Data = temp_data,
@@ -1391,7 +1388,7 @@ run_AMOPLS <- function(datamatrix,
 
   ## Extract for each orthogonal component
   results_combined <- lapply(1:unique(sapply(output, length)), function(z) {
-    # z <- 1
+    # z <- unique(sapply(output, length))[1]
     temp_orthon <- lapply(output, function(w) {w[[z]]})
 
     ## Calculate median
@@ -1531,7 +1528,7 @@ run_AMOPLS <- function(datamatrix,
     }) %>%
       rbindlist(use.names = T, fill = TRUE) %>%
       {.[, lapply(.SD, function(x) {median(x, na.rm = T)}), keyby = c("sampleid")]} %>%
-      {as.data.frame(., row.names = "sampleid")}
+      {as.data.frame(., row.names = .$sampleid)}
 
     output_decompoANOVA <- lapply(1:(length(temp_orthon[[1]]$decompo_ANOVA) - 1), function(y) {
       # y <- 1
@@ -1541,9 +1538,11 @@ run_AMOPLS <- function(datamatrix,
           {.[which(!names(.) %in% "residuals")]} %>% .[[y]] %>% .[["means.matrix_res"]] %>%
           as.data.table(keep.rownames = "sampleid")
       }) %>%
-        rbindlist(use.names = T, fill = TRUE) %>%
-        {.[, lapply(.SD, function(x) {median(x, na.rm = T)}), keyby = c("sampleid")]} %>%
-        as.data.frame(., row.names = "sampleid")
+        rbindlist(use.names = T, fill = TRUE) %>% {
+          .[, lapply(.SD, function(x) {median(x, na.rm = T)}), keyby = c("sampleid")]
+          } %>% {
+          as.data.frame(., row.names = .$sampleid)
+        }
     })
     names(output_decompoANOVA) <- names(temp_orthon[[1]]$decompo_ANOVA) %>% {.[!. == "residuals"]}
 

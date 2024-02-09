@@ -22,14 +22,14 @@ Most biologist need to extract relevant information (treatment, tissular, organs
 ## Getting started
 ### Installing
 
-`rAMOPLS` can be installed using one of the following methods:
+`rAMOPLS` can be installed using one of the following methods:  
+  - `remotes`: `remotes::install_github('sdechaumet/rAMOPLS')`  
+  - `devtools`: `devtools::install_github('sdechaumet/rAMOPLS')`  
+  - `renv`: `renv::install('github:sdechaumet/rAMOPLS')`  
+  - `pak`: `pak::pkg_install('sdechaumet/rAMOPLS')`  
 
-- Directly from a remote location using `remotes` or `devtools` packages  
-- By cloning or downloading this project and performing an installation from source (see `utils::install.packages()`)  
-
-
-The AMOPLS method depends on the kopls package which is available [here](http://kopls.sourceforge.net/index.shtml). A copy of the package sources is implemented inside the `rAMOPLS` and can be installed with `rAMOPLS::install_kopls()`.
-
+The AMOPLS method depends on the kopls package which is available [here](http://kopls.sourceforge.net/index.shtml).
+A copy of the package sources is implemented inside the `rAMOPLS` and can be installed with `rAMOPLS::install_kopls()`.
 
 ### Calculate an AMOPLS model
 
