@@ -1019,8 +1019,10 @@ fun_VIP <- function(s) {
     setnames(VIP, c("id", s$general$factor_names[i]))
     return(VIP)
   }) %>%
-    {Reduce(function(z, w) {merge(z, w, by = "id", all = T)}, .)}
-  VIP_n <- VIP_n[names$V1]
+    {Reduce(function(z, w) {merge(z, w, on = "id", all = T)}, .)}
+  # data.table 1.18.x requires `on=` when i is a data.table or character vector.
+  # Reorder VIP_n to match the original column order of the data matrix.
+  VIP_n <- VIP_n[as.character(names$V1), on = "id"]
   return(VIP_n)
 }
 
@@ -1182,7 +1184,7 @@ run_AMOPLS <- function(datamatrix,
   # datamatrix = data_Ruiz2017$datamatrix
   # samplemetadata = data_Ruiz2017$samplemetadata
   # factor_names = c("Exposure time", "Dose")
-  DEBUG <- Effect <- Iter <- Iteration <- Ortho <- Ortho_nb <- PermNb <- R2Y <- R2Y <- `p-value` <- R2Y_pval <- V_scores <- V_sign <- availableWorkers <- combn <- `cor.test` <- density <- id <- [...]
+  DEBUG <- Effect <- Iter <- Iteration <- Ortho <- Ortho_nb <- PermNb <- R2Y <- R2Y <- `p-value` <- R2Y_pval <- V_scores <- V_sign <- availableWorkers <- combn <- `cor.test` <- density <- id <- NULL
   if (debug) {
     DEBUG <- NULL
     requireNamespace("logger")
@@ -1264,7 +1266,7 @@ run_AMOPLS <- function(datamatrix,
     iter_template <- CJ("Effect" = factors_element, "PermI" = 1:nb_perm, "Ortho" = nb_compo_orthos)
     iter_template[, Iter := 1:.N]
     apply_it <- nrow(iter_template)
-    if (debug) {logger::log_info("Running {nb_perm} permutations for each factor and ortho cp: {nb_perm} x {nb_studied_factors} x {length(nb_compo_orthos)} = {nb_perm*nb_studied_factors*length(n[...]"}
+    if (debug) {logger::log_info("Running {nb_perm} permutations for each factor and ortho cp: {nb_perm} x {nb_studied_factors} x {length(nb_compo_orthos)} = {nb_perm*nb_studied_factors*length(nb_compo_orthos)}")}
 
     if (!is.null(parallel) & !isFALSE(parallel)) {
       if(!requireNamespace("future")) {
@@ -1314,7 +1316,7 @@ run_AMOPLS <- function(datamatrix,
 
     temp_dt <- temp %>%
       rbindlist() %>%
-      merge(., iter_template, by = "Iter")
+      merge(., iter_template, on = "Iter")
 
     ## P-value calculation
     output_pval <- lapply(1:length(nb_compo_orthos), function(cp) {
@@ -1332,7 +1334,7 @@ run_AMOPLS <- function(datamatrix,
           setnames(output, c("Effect", "Effect_name", paste0(x, "_pvalue")))
           return(output)
         }) %>% rbindlist(use.names = T)
-      }) %>% {Reduce(function(z, w) {merge(z, w, by = c("Effect", "Effect_name"))}, .)}
+      }) %>% {Reduce(function(z, w) {merge(z, w, on = c("Effect", "Effect_name"))}, .)}
     })
 
     output_pval <- lapply(output_pval, function(x) {
@@ -1418,7 +1420,7 @@ run_AMOPLS <- function(datamatrix,
         # x <- 1
         var_col <- names(output_scores)[x+2]
         col_sel <- c("id", "rn", var_col)
-        output_scores[, col_sel, with = F] %>% dcast(., id ~ rn, value.var = var_col) %>% {.[, -1][, lapply(.SD, function(z) {if(stats::cor.test(z, .[, 2][[1]])$estimate < 0) {return(-1)} else {[...]
+        output_scores[, col_sel, with = F] %>% dcast(., id ~ rn, value.var = var_col) %>% {.[, -1][, lapply(.SD, function(z) {if(stats::cor.test(z, .[, 2][[1]])$estimate < 0) {return(-1)} else {return(1)}} %>% round(., 1))]}
       }) %>% as.data.table(keep.rownames = 'rn')
 
       scores_sign[, rn := as.numeric(rn)]
@@ -1427,14 +1429,14 @@ run_AMOPLS <- function(datamatrix,
         var_col <- names(output_scores)[x+2]
         ## Reverse axes with negative correlation by component
         temp_merge <- merge(output_scores[, .(id, rn, "V_scores" = get(var_col))],
-                            scores_sign[, .(rn, "V_sign" = get(var_col))], by = "rn")
+                            scores_sign[, .(rn, "V_sign" = get(var_col))], on = "rn")
         row_nb <- temp_merge[, .N]
         temp_merge[, tp_calc := ifelse(any(is.na(V_scores), is.na(V_sign)), NA, as.numeric(V_scores) * as.numeric(V_sign)), by = 1:row_nb]
         ## Calculate median
         output <- temp_merge[, median(tp_calc), by = "id"]
         setnames(output, c("id", var_col))
         return(output)
-      }) %>% {Reduce(function(x, y) {merge(x, y, by = "id", all = T)}, .)} %>%
+      }) %>% {Reduce(function(x, y) {merge(x, y, on = "id", all = T)}, .)} %>%
         {.[rownames(Data$dataset)]} %>%
         as.matrix(rownames = "id")
     }
@@ -1456,7 +1458,7 @@ run_AMOPLS <- function(datamatrix,
         # x <- 1
         var_col <- names(output_loadings)[x+2]
         col_sel <- c("id", "rn", var_col)
-        output_loadings[, col_sel, with = F] %>% dcast(., id ~ rn, value.var = var_col) %>% {.[, -1][, lapply(.SD, function(z) {if(stats::cor.test(z, .[, 2][[1]])$estimate < 0) {return(-1)} else {[...]
+        output_loadings[, col_sel, with = F] %>% dcast(., id ~ rn, value.var = var_col) %>% {.[, -1][, lapply(.SD, function(z) {if(stats::cor.test(z, .[, 2][[1]])$estimate < 0) {return(-1)} else {return(1)}} %>% round(., 1))]}
       }) %>%
         as.data.table(keep.rownames = 'rn')
       loadings_sign[, rn := as.numeric(rn)]
@@ -1465,14 +1467,14 @@ run_AMOPLS <- function(datamatrix,
         var_col <- names(output_loadings)[x+2]
         ## Reverse axes with negative correlation by component
         temp_merge <- merge(output_loadings[, .(id, rn, "V_scores" = get(var_col))],
-                            loadings_sign[, .(rn, "V_sign" = get(var_col))], by = "rn")
+                            loadings_sign[, .(rn, "V_sign" = get(var_col))], on = "rn")
         row_nb <- temp_merge[, .N]
         temp_merge[, tp_calc := ifelse(any(is.na(V_scores), is.na(V_sign)), NA, as.numeric(V_scores) * as.numeric(V_sign)), by = 1:row_nb]
         ## Calculate median
         output <- temp_merge[, median(tp_calc), by = "id"]
         setnames(output, c("id", var_col))
         return(output)
-      }) %>% {Reduce(function(x, y) {merge(x, y, by = "id", all = T)}, .)} %>%
+      }) %>% {Reduce(function(x, y) {merge(x, y, on = "id", all = T)}, .)} %>%
         {.[colnames(Data$dataset)]} %>%
         as.matrix(rownames = "id")
     }
@@ -1593,7 +1595,7 @@ run_AMOPLS <- function(datamatrix,
 #' @param t_2 Second component to project the x-scores
 #' @inheritParams fun_outputs
 #'
-#' @return 2D score plot of the x-scores from AMOPLS results according to the 2 selected components. Every datapoint is colored according to its factor-level. Every color group is surrounded by [...]
+#' @return 2D score plot of the x-scores from AMOPLS results according to the 2 selected components. Every datapoint is colored according to its factor-level. Every color group is surrounded by a convex hull.
 #' #'
 #' @import ggplot2
 #' @import magrittr
@@ -1909,7 +1911,7 @@ fun_AMOPLS_summary <- function(s, type = c("All", "RSS", "RSR", "Permutation", "
                   fun_get_blockcontrib(.)
              )
            } %>% {
-             Reduce(function(x, y) {merge(x, y, by = c("Effect", "Effect Name"), all = T)}, .)
+             Reduce(function(x, y) {merge(x, y, on = c("Effect", "Effect Name"), all = T)}, .)
            }
          }
   )
