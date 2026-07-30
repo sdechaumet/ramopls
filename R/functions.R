@@ -125,24 +125,29 @@ fun_load_data <- function(datamatrix, samplemetadata, factor_names) {
                          stop("datamatrix must be a matrix, a data.frame or a data.table")
   )
 
-  if (data.table(Data$dataset) %>% .[, lapply(.SD, function(x) {any(is.na(x))})] %>% {any(. == T)}) {
+  ## Robust NA check: avoid magrittr + data.table NSE mixing
+  dt_dataset <- as.data.table(Data$dataset)
+  has_na <- any(unlist(dt_dataset[, lapply(.SD, function(x) any(is.na(x)))]))
+  if (has_na) {
     stop("NA are not allowed in the datamatrix, check and treat the NA before AMOPLS analysis")
   }
 
   ## Format samplemetadata
   ### Search sampleid in samplemetadata
-  samplemetadata <- as.data.table(samplemetadata, keep.rownames = T)
-  sampleid_col <- samplemetadata %>% .[, lapply(.SD, function(x) {all(x %in% rownames(Data$dataset))})] %>% {which(. == T)}
+  samplemetadata <- as.data.table(samplemetadata, keep.rownames = TRUE)
+  matches <- samplemetadata[, unlist(lapply(.SD, function(x) {all(x %in% rownames(Data$dataset))}))]
+  sampleid_col <- which(matches)
   if (length(sampleid_col) == 0) {
     stop("No column in samplemetadata corresponds to the sample IDs.")
   }
 
   ## Check factor_names
-  if (!any(factor_names %in% colnames(samplemetadata))) {
+  if (!all(factor_names %in% colnames(samplemetadata))) {
     stop("Some factor_names are not present in samplemetadata, check samplemetadata column names")
   }
 
-  Data$factors <- samplemetadata[, factor_names, with = F] %>% as.matrix(., rownames = samplemetadata[, sampleid_col, with = F][[1]])
+  Data$factors <- as.matrix(samplemetadata[, ..factor_names])
+  rownames(Data$factors) <- samplemetadata[[sampleid_col]]
 
   return(Data)
 }
@@ -436,7 +441,7 @@ fun_factors_data <- function(factors, studied_factors) {
   factor_names <- fun_factor_names(factors, studied_factors)
   ## Clustering of data in one matrix for score plots
   # pure effect factors :
-  temp_data <- factors %>% data.table()
+  temp_data <- as.data.table(factors)
   temp_fac_list <- studied_factors %>% {strsplit(as.character(.), ",")[[1]]}
 
   temp_data <- mapply(function(x, z) {
@@ -458,7 +463,7 @@ fun_factors_data <- function(factors, studied_factors) {
 #' @param s List corresponding to the dataset to study
 #' @param ee Internal parameter corresponding to the factor element under study
 #' @param perm_t Element to permute
-#'
+#' 
 #' @return \item{s$general$dataset}{Permuted dataset}
 #' @export
 fun_perm_settings <- function(s, ee, perm_t) {
@@ -711,6 +716,8 @@ fun_kopls <- function(K, Y, A, nox) {
 
 
 
+
+
 #' Plot R2Y and p-value for each orthogonal models
 #'
 #' @inheritParams fun_outputs
@@ -891,7 +898,7 @@ fun_xloadings <- function(s) {
 
   for (o in 1:s$general$Nb_compo_ortho) {
     if (s$general$ee.names[s$outputs$Most_influent_factor[, o]] != 'residuals') {
-      x_loadings[, s$general$Nb_compo_pred + o] <- t(s$decompo_ANOVA[[s$general$ee.names[s$outputs$Most_influent_factor[, o]]]]$means.matrix_res) %*% as.matrix(s$kOPLS$To[, o]) / as.numeric((t(s$kOPLS$T[, o]) %*% s$kOPLS$T[, o]))
+      x_loadings[, s$general$Nb_compo_pred + o] <- t(s$decompo_ANOVA[[s$general$ee.names[s$outputs$Most_influent_factor[, o]]]]$means.matrix_res) %*% as.matrix(s$kOPLS$To[, o]) / as.numeric((t(s$kOPLS$To[, o]) %*% s$kOPLS$To[, o]))
     } else {
       x_loadings[, o] <- t(s$decompo_ANOVA$residuals) %*% as.matrix(s$kOPLS$T[, o]) / as.numeric((t(s$kOPLS$T[, o]) %*% s$kOPLS$T[, o]))
     }
@@ -1175,7 +1182,7 @@ run_AMOPLS <- function(datamatrix,
   # datamatrix = data_Ruiz2017$datamatrix
   # samplemetadata = data_Ruiz2017$samplemetadata
   # factor_names = c("Exposure time", "Dose")
-  DEBUG <- Effect <- Iter <- Iteration <- Ortho <- Ortho_nb <- PermNb <- R2Y <- R2Y <- `p-value` <- R2Y_pval <- V_scores <- V_sign <- availableWorkers <- combn <- `cor.test` <- density <- id <- layout <- plot <- rn <- str <- tp_calc <- value <- variable <- variableid <- x <- y <- NULL
+  DEBUG <- Effect <- Iter <- Iteration <- Ortho <- Ortho_nb <- PermNb <- R2Y <- R2Y <- `p-value` <- R2Y_pval <- V_scores <- V_sign <- availableWorkers <- combn <- `cor.test` <- density <- id <- [...]
   if (debug) {
     DEBUG <- NULL
     requireNamespace("logger")
@@ -1257,7 +1264,7 @@ run_AMOPLS <- function(datamatrix,
     iter_template <- CJ("Effect" = factors_element, "PermI" = 1:nb_perm, "Ortho" = nb_compo_orthos)
     iter_template[, Iter := 1:.N]
     apply_it <- nrow(iter_template)
-    if (debug) {logger::log_info("Running {nb_perm} permutations for each factor and ortho cp: {nb_perm} x {nb_studied_factors} x {length(nb_compo_orthos)} = {nb_perm*nb_studied_factors*length(nb_compo_orthos)}")}
+    if (debug) {logger::log_info("Running {nb_perm} permutations for each factor and ortho cp: {nb_perm} x {nb_studied_factors} x {length(nb_compo_orthos)} = {nb_perm*nb_studied_factors*length(n[...]"}
 
     if (!is.null(parallel) & !isFALSE(parallel)) {
       if(!requireNamespace("future")) {
@@ -1395,9 +1402,11 @@ run_AMOPLS <- function(datamatrix,
     ### Need to check scores and loadings orientation of each component (may be arbitrarly reversed between models)
 
     #### SCORES
-    if (temp_orthon %>% length() <= 1) {
+    if (length(temp_orthon) <= 1) {
       x <- temp_orthon[[1]]
-      output_scores <- data.table("id" = rownames(x$general$factors), x$output$x_scores) %>% as.matrix(., rownames = "id")
+      dt_scores <- data.table("id" = rownames(x$general$factors), x$output$x_scores)
+      output_scores <- as.matrix(dt_scores[, -1, with = FALSE])
+      rownames(output_scores) <- dt_scores[[1]]
     } else {
       output_scores <- lapply(temp_orthon, function(x) {
         # x <- temp_orthon[[1]]
@@ -1409,7 +1418,7 @@ run_AMOPLS <- function(datamatrix,
         # x <- 1
         var_col <- names(output_scores)[x+2]
         col_sel <- c("id", "rn", var_col)
-        output_scores[, col_sel, with = F] %>% dcast(., id ~ rn, value.var = var_col) %>% {.[, -1][, lapply(.SD, function(z) {if(stats::cor.test(z, .[, 2][[1]])$estimate < 0) {return(-1)} else {return(1)}} %>% round(., 1))]}
+        output_scores[, col_sel, with = F] %>% dcast(., id ~ rn, value.var = var_col) %>% {.[, -1][, lapply(.SD, function(z) {if(stats::cor.test(z, .[, 2][[1]])$estimate < 0) {return(-1)} else {[...]
       }) %>% as.data.table(keep.rownames = 'rn')
 
       scores_sign[, rn := as.numeric(rn)]
@@ -1431,9 +1440,11 @@ run_AMOPLS <- function(datamatrix,
     }
 
     ## LOADINGS
-    if (temp_orthon %>% length() <= 1) {
+    if (length(temp_orthon) <= 1) {
       x <- temp_orthon[[1]]
-      output_loadings <- data.table("id" = colnames(x$general$data), x$output$x_loadings) %>% as.matrix(., rownames = "id")
+      dt_loadings <- data.table("id" = colnames(x$general$data), x$output$x_loadings)
+      output_loadings <- as.matrix(dt_loadings[, -1, with = FALSE])
+      rownames(output_loadings) <- dt_loadings[[1]]
     } else {
       output_loadings <- lapply(temp_orthon, function(x) {
         # x <- temp_orthon[[1]]
@@ -1445,7 +1456,7 @@ run_AMOPLS <- function(datamatrix,
         # x <- 1
         var_col <- names(output_loadings)[x+2]
         col_sel <- c("id", "rn", var_col)
-        output_loadings[, col_sel, with = F] %>% dcast(., id ~ rn, value.var = var_col) %>% {.[, -1][, lapply(.SD, function(z) {if(stats::cor.test(z, .[, 2][[1]])$estimate < 0) {return(-1)} else {return(1)}} %>% round(., 1))]}
+        output_loadings[, col_sel, with = F] %>% dcast(., id ~ rn, value.var = var_col) %>% {.[, -1][, lapply(.SD, function(z) {if(stats::cor.test(z, .[, 2][[1]])$estimate < 0) {return(-1)} else {[...]
       }) %>%
         as.data.table(keep.rownames = 'rn')
       loadings_sign[, rn := as.numeric(rn)]
@@ -1574,7 +1585,6 @@ run_AMOPLS <- function(datamatrix,
 }
 
 
-
 #' @title Score plot
 #' @description Score plot of the x-scores from AMOPLS results, according to the selected factor and components.
 #'
@@ -1583,13 +1593,13 @@ run_AMOPLS <- function(datamatrix,
 #' @param t_2 Second component to project the x-scores
 #' @inheritParams fun_outputs
 #'
-#' @return 2D score plot of the x-scores from AMOPLS results according to the 2 selected components. Every datapoint is colored according to its factor-level. Every color group is surrounded by a convex hull.
-#'
+#' @return 2D score plot of the x-scores from AMOPLS results according to the 2 selected components. Every datapoint is colored according to its factor-level. Every color group is surrounded by [...]
+#' #'
 #' @import ggplot2
 #' @import magrittr
 #' @import data.table
 #' @import ggpubr
-#'
+#' #'
 #' @references From grDevices chull
 #' @export
 fun_score_plot <- function(s, fact, t_1 = NULL, t_2 = NULL) {
@@ -1652,7 +1662,7 @@ fun_score_plot <- function(s, fact, t_1 = NULL, t_2 = NULL) {
 #' @import magrittr
 #' @import data.table
 #' @import ggpubr
-#'
+#' #'
 #' @export
 #'
 fun_plot_optimal_scores <- function(s) {
@@ -1821,7 +1831,6 @@ fun_plot_VIPs <- function(s, main_factor = NULL, VIP_nb = NULL, debugL = F) {
           legend.key.size = unit(0.8, "cm"),
           legend.text = element_text(size = 11, hjust = 0.3, face = 'bold'))
 }
-
 
 #' Function to get RSS
 #'
@@ -2048,7 +2057,7 @@ MetStat.PCA.Calculate <- function (data) {
 #'
 #' @inheritParams base::solve
 #' @inheritParams kopls::koplsModel
-#'
+#' 
 koplsModel_custom <- function(K, Y, A, nox, preProcK = "mc", preProcY = "mc", tol = 1e-20) {
   if (!requireNamespace("kopls", quietly = TRUE)) {
     stop("Package \"kopls\" needed for this function to work. Please install it using install_kopls()",
@@ -2170,4 +2179,3 @@ koplsModel_custom <- function(K, Y, A, nox, preProcK = "mc", preProcY = "mc", to
 fun_get_summary <- function(s) {
   s$output$Summary %>% {.[s$general$ee.names]}
 }
-
