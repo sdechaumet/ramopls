@@ -1,3 +1,27 @@
+﻿# ---------------------------------------------------------------------------
+# .rbindlist_typed -- data.table >= 1.18 rbindlist() is STRICT about column
+# types across list elements: if one draw yields an integer-valued column and
+# another a double, it errors ("Column N of result for group G is type 'integer'
+# but expecting type 'double'") instead of coercing as older data.table did.
+# rAMOPLS' permutation/subsampling assembly produces exactly that (some effects
+# come out integer for some draws), so every rbindlist() in this package is
+# routed through this wrapper, which coerces non-factor integer columns to
+# double before binding. Factors are preserved (they are integer-typed too).
+# Fix for MELIPOP-Orb / data.table 1.18.x, 2026-09-27.
+# ---------------------------------------------------------------------------
+.rbindlist_typed <- function(l, ...) {
+  if (is.data.frame(l)) return(rbindlist(l, ...))
+  l <- lapply(l, function(d) {
+    if (is.data.frame(d)) {
+      for (cc in names(d)) {
+        if (is.integer(d[[cc]]) && !is.factor(d[[cc]])) d[[cc]] <- as.numeric(d[[cc]])
+      }
+    }
+    d
+  })
+  rbindlist(l, ...)
+}
+
 utils::globalVariables(c("."))
 
 
@@ -125,24 +149,29 @@ fun_load_data <- function(datamatrix, samplemetadata, factor_names) {
                          stop("datamatrix must be a matrix, a data.frame or a data.table")
   )
 
-  if (data.table(Data$dataset) %>% .[, lapply(.SD, function(x) {any(is.na(x))})] %>% {any(. == T)}) {
+  ## Robust NA check: avoid magrittr + data.table NSE mixing
+  dt_dataset <- as.data.table(Data$dataset)
+  has_na <- any(unlist(dt_dataset[, lapply(.SD, function(x) any(is.na(x)))]))
+  if (has_na) {
     stop("NA are not allowed in the datamatrix, check and treat the NA before AMOPLS analysis")
   }
 
   ## Format samplemetadata
   ### Search sampleid in samplemetadata
-  samplemetadata <- as.data.table(samplemetadata, keep.rownames = T)
-  sampleid_col <- samplemetadata %>% .[, lapply(.SD, function(x) {all(x %in% rownames(Data$dataset))})] %>% {which(. == T)}
+  samplemetadata <- as.data.table(samplemetadata, keep.rownames = TRUE)
+  matches <- samplemetadata[, unlist(lapply(.SD, function(x) {all(x %in% rownames(Data$dataset))}))]
+  sampleid_col <- which(matches)
   if (length(sampleid_col) == 0) {
     stop("No column in samplemetadata corresponds to the sample IDs.")
   }
 
   ## Check factor_names
-  if (!any(factor_names %in% colnames(samplemetadata))) {
+  if (!all(factor_names %in% colnames(samplemetadata))) {
     stop("Some factor_names are not present in samplemetadata, check samplemetadata column names")
   }
 
-  Data$factors <- samplemetadata[, factor_names, with = F] %>% as.matrix(., rownames = samplemetadata[, sampleid_col, with = F][[1]])
+  Data$factors <- as.matrix(samplemetadata[, ..factor_names])
+  rownames(Data$factors) <- samplemetadata[[sampleid_col]]
 
   return(Data)
 }
@@ -436,7 +465,7 @@ fun_factors_data <- function(factors, studied_factors) {
   factor_names <- fun_factor_names(factors, studied_factors)
   ## Clustering of data in one matrix for score plots
   # pure effect factors :
-  temp_data <- factors %>% data.table()
+  temp_data <- as.data.table(factors)
   temp_fac_list <- studied_factors %>% {strsplit(as.character(.), ",")[[1]]}
 
   temp_data <- mapply(function(x, z) {
@@ -458,7 +487,7 @@ fun_factors_data <- function(factors, studied_factors) {
 #' @param s List corresponding to the dataset to study
 #' @param ee Internal parameter corresponding to the factor element under study
 #' @param perm_t Element to permute
-#'
+#' 
 #' @return \item{s$general$dataset}{Permuted dataset}
 #' @export
 fun_perm_settings <- function(s, ee, perm_t) {
@@ -711,6 +740,8 @@ fun_kopls <- function(K, Y, A, nox) {
 
 
 
+
+
 #' Plot R2Y and p-value for each orthogonal models
 #'
 #' @inheritParams fun_outputs
@@ -732,7 +763,7 @@ fun_plot_ortho <- function(s) {
                "Ortho_nb" = x$general$Nb_compo_ortho,
                "Iteration" = x$output$Permutation_result$PermNb %>% unique())
   }) %>%
-    rbindlist(use.names = T, idcol = "rn") %>% {
+    .rbindlist_typed(use.names = T, idcol = "rn") %>% {
       ggplot(., aes(Ortho_nb, R2Y)) +
         geom_bar(stat = "identity", color = "black", fill = "grey") +
         theme_bw() +
@@ -891,7 +922,7 @@ fun_xloadings <- function(s) {
 
   for (o in 1:s$general$Nb_compo_ortho) {
     if (s$general$ee.names[s$outputs$Most_influent_factor[, o]] != 'residuals') {
-      x_loadings[, s$general$Nb_compo_pred + o] <- t(s$decompo_ANOVA[[s$general$ee.names[s$outputs$Most_influent_factor[, o]]]]$means.matrix_res) %*% as.matrix(s$kOPLS$To[, o]) / as.numeric((t(s$kOPLS$T[, o]) %*% s$kOPLS$T[, o]))
+      x_loadings[, s$general$Nb_compo_pred + o] <- t(s$decompo_ANOVA[[s$general$ee.names[s$outputs$Most_influent_factor[, o]]]]$means.matrix_res) %*% as.matrix(s$kOPLS$To[, o]) / as.numeric((t(s$kOPLS$To[, o]) %*% s$kOPLS$To[, o]))
     } else {
       x_loadings[, o] <- t(s$decompo_ANOVA$residuals) %*% as.matrix(s$kOPLS$T[, o]) / as.numeric((t(s$kOPLS$T[, o]) %*% s$kOPLS$T[, o]))
     }
@@ -1012,8 +1043,10 @@ fun_VIP <- function(s) {
     setnames(VIP, c("id", s$general$factor_names[i]))
     return(VIP)
   }) %>%
-    {Reduce(function(z, w) {merge(z, w, by = "id", all = T)}, .)}
-  VIP_n <- VIP_n[names$V1]
+    {Reduce(function(z, w) {merge(z, w, on = "id", all = T)}, .)}
+  # data.table 1.18.x requires `on=` when i is a data.table or character vector.
+  # Reorder VIP_n to match the original column order of the data matrix.
+  VIP_n <- VIP_n[as.character(names$V1), on = "id"]
   return(VIP_n)
 }
 
@@ -1175,7 +1208,7 @@ run_AMOPLS <- function(datamatrix,
   # datamatrix = data_Ruiz2017$datamatrix
   # samplemetadata = data_Ruiz2017$samplemetadata
   # factor_names = c("Exposure time", "Dose")
-  DEBUG <- Effect <- Iter <- Iteration <- Ortho <- Ortho_nb <- PermNb <- R2Y <- R2Y <- `p-value` <- R2Y_pval <- V_scores <- V_sign <- availableWorkers <- combn <- `cor.test` <- density <- id <- layout <- plot <- rn <- str <- tp_calc <- value <- variable <- variableid <- x <- y <- NULL
+  DEBUG <- Effect <- Iter <- Iteration <- Ortho <- Ortho_nb <- PermNb <- R2Y <- R2Y <- `p-value` <- R2Y_pval <- V_scores <- V_sign <- availableWorkers <- combn <- `cor.test` <- density <- id <- NULL
   if (debug) {
     DEBUG <- NULL
     requireNamespace("logger")
@@ -1306,8 +1339,8 @@ run_AMOPLS <- function(datamatrix,
     }
 
     temp_dt <- temp %>%
-      rbindlist() %>%
-      merge(., iter_template, by = "Iter")
+      .rbindlist_typed() %>%
+      merge(., iter_template, on = "Iter")
 
     ## P-value calculation
     output_pval <- lapply(1:length(nb_compo_orthos), function(cp) {
@@ -1324,8 +1357,8 @@ run_AMOPLS <- function(datamatrix,
           output <- data.table(effect, effect_name, temp_subset)
           setnames(output, c("Effect", "Effect_name", paste0(x, "_pvalue")))
           return(output)
-        }) %>% rbindlist(use.names = T)
-      }) %>% {Reduce(function(z, w) {merge(z, w, by = c("Effect", "Effect_name"))}, .)}
+        }) %>% .rbindlist_typed(use.names = T)
+      }) %>% {Reduce(function(z, w) {merge(z, w, on = c("Effect", "Effect_name"))}, .)}
     })
 
     output_pval <- lapply(output_pval, function(x) {
@@ -1395,15 +1428,17 @@ run_AMOPLS <- function(datamatrix,
     ### Need to check scores and loadings orientation of each component (may be arbitrarly reversed between models)
 
     #### SCORES
-    if (temp_orthon %>% length() <= 1) {
+    if (length(temp_orthon) <= 1) {
       x <- temp_orthon[[1]]
-      output_scores <- data.table("id" = rownames(x$general$factors), x$output$x_scores) %>% as.matrix(., rownames = "id")
+      dt_scores <- data.table("id" = rownames(x$general$factors), x$output$x_scores)
+      output_scores <- as.matrix(dt_scores[, -1, with = FALSE])
+      rownames(output_scores) <- dt_scores[[1]]
     } else {
       output_scores <- lapply(temp_orthon, function(x) {
         # x <- temp_orthon[[1]]
         data.table("id" = rownames(x$general$factors), x$output$x_scores)
       }) %>%
-        rbindlist(use.names = T, fill = TRUE, idcol = "rn")
+        .rbindlist_typed(use.names = T, fill = TRUE, idcol = "rn")
       ## Check component correlation between each models
       scores_sign <- sapply(1:(ncol(output_scores)-2), function(x) {
         # x <- 1
@@ -1418,28 +1453,30 @@ run_AMOPLS <- function(datamatrix,
         var_col <- names(output_scores)[x+2]
         ## Reverse axes with negative correlation by component
         temp_merge <- merge(output_scores[, .(id, rn, "V_scores" = get(var_col))],
-                            scores_sign[, .(rn, "V_sign" = get(var_col))], by = "rn")
+                            scores_sign[, .(rn, "V_sign" = get(var_col))], on = "rn")
         row_nb <- temp_merge[, .N]
         temp_merge[, tp_calc := ifelse(any(is.na(V_scores), is.na(V_sign)), NA, as.numeric(V_scores) * as.numeric(V_sign)), by = 1:row_nb]
         ## Calculate median
         output <- temp_merge[, median(tp_calc), by = "id"]
         setnames(output, c("id", var_col))
         return(output)
-      }) %>% {Reduce(function(x, y) {merge(x, y, by = "id", all = T)}, .)} %>%
+      }) %>% {Reduce(function(x, y) {merge(x, y, on = "id", all = T)}, .)} %>%
         {.[rownames(Data$dataset)]} %>%
         as.matrix(rownames = "id")
     }
 
     ## LOADINGS
-    if (temp_orthon %>% length() <= 1) {
+    if (length(temp_orthon) <= 1) {
       x <- temp_orthon[[1]]
-      output_loadings <- data.table("id" = colnames(x$general$data), x$output$x_loadings) %>% as.matrix(., rownames = "id")
+      dt_loadings <- data.table("id" = colnames(x$general$data), x$output$x_loadings)
+      output_loadings <- as.matrix(dt_loadings[, -1, with = FALSE])
+      rownames(output_loadings) <- dt_loadings[[1]]
     } else {
       output_loadings <- lapply(temp_orthon, function(x) {
         # x <- temp_orthon[[1]]
         data.table("id" = colnames(x$general$data), x$output$x_loadings)
       }) %>%
-        rbindlist(use.names = T, fill = TRUE, idcol = "rn")
+        .rbindlist_typed(use.names = T, fill = TRUE, idcol = "rn")
       ## Check component correlation between each models
       loadings_sign <- sapply(1:(ncol(output_loadings)-2), function(x) {
         # x <- 1
@@ -1454,14 +1491,14 @@ run_AMOPLS <- function(datamatrix,
         var_col <- names(output_loadings)[x+2]
         ## Reverse axes with negative correlation by component
         temp_merge <- merge(output_loadings[, .(id, rn, "V_scores" = get(var_col))],
-                            loadings_sign[, .(rn, "V_sign" = get(var_col))], by = "rn")
+                            loadings_sign[, .(rn, "V_sign" = get(var_col))], on = "rn")
         row_nb <- temp_merge[, .N]
         temp_merge[, tp_calc := ifelse(any(is.na(V_scores), is.na(V_sign)), NA, as.numeric(V_scores) * as.numeric(V_sign)), by = 1:row_nb]
         ## Calculate median
         output <- temp_merge[, median(tp_calc), by = "id"]
         setnames(output, c("id", var_col))
         return(output)
-      }) %>% {Reduce(function(x, y) {merge(x, y, by = "id", all = T)}, .)} %>%
+      }) %>% {Reduce(function(x, y) {merge(x, y, on = "id", all = T)}, .)} %>%
         {.[colnames(Data$dataset)]} %>%
         as.matrix(rownames = "id")
     }
@@ -1469,7 +1506,7 @@ run_AMOPLS <- function(datamatrix,
       # x <- temp_orthon[[3]]
       data.table("id" = c(x$general$factor_names[x$general$order.to.evaluate.ee], "residual"), x$output$block_saliences_norm)
     }) %>%
-      rbindlist(use.names = T, fill = TRUE) %>%
+      .rbindlist_typed(use.names = T, fill = TRUE) %>%
       {.[, lapply(.SD, median), keyby = "id"]} %>%
       as.matrix(rownames = "id")
 
@@ -1477,28 +1514,28 @@ run_AMOPLS <- function(datamatrix,
       # x <- temp_orthon[[3]]
       x$output$RSS
     }) %>%
-      rbindlist(use.names = T, fill = TRUE) %>%
+      .rbindlist_typed(use.names = T, fill = TRUE) %>%
       {.[, lapply(.SD, median), keyby = c("Effect", "Effect Name")]}
 
     output_RSR <- lapply(temp_orthon, function(x) {
       # x <- temp_orthon[[3]]
       x$output$RSR
     }) %>%
-      rbindlist(use.names = T, fill = TRUE) %>%
+      .rbindlist_typed(use.names = T, fill = TRUE) %>%
       {.[, lapply(.SD, median), keyby = c("Effect", "Effect Name")]}
 
     output_SSQ <- lapply(temp_orthon, function(x) {
       # x <- temp_orthon[[3]]
       x$output$SSQ
     }) %>%
-      rbindlist(use.names = T, fill = TRUE) %>%
+      .rbindlist_typed(use.names = T, fill = TRUE) %>%
       {.[, lapply(.SD, median)]}
 
     output_Perm <- lapply(temp_orthon, function(x) {
       # x <- temp_orthon[[3]]
       x$output$Permutation_result$summary
     }) %>%
-      rbindlist(use.names = T, fill = TRUE) %>%
+      .rbindlist_typed(use.names = T, fill = TRUE) %>%
       {.[, lapply(.SD, median), keyby = c("Effect", "Effect Name")]}
 
     output_R2Y <- sapply(temp_orthon, function(x) {
@@ -1511,14 +1548,14 @@ run_AMOPLS <- function(datamatrix,
       # x <- temp_orthon[[1]]
       x$output$VIP
     }) %>%
-      rbindlist(use.names = T, fill = TRUE) %>%
+      .rbindlist_typed(use.names = T, fill = TRUE) %>%
       {.[, lapply(.SD, median), keyby = c("id")]}
 
     output_Summary <- lapply(temp_orthon, function(x) {
       # x <- temp_orthon[[1]]
       x$output$Summary
     }) %>%
-      rbindlist(use.names = T, fill = TRUE) %>%
+      .rbindlist_typed(use.names = T, fill = TRUE) %>%
       {.[, lapply(.SD, function(x) {median(x, na.rm = T)}), keyby = c("Effect", "Effect Name")]}
 
     #### DEV
@@ -1526,7 +1563,7 @@ run_AMOPLS <- function(datamatrix,
       # x <- temp_orthon[[1]]
       x$decompo_ANOVA$residuals %>% as.data.table(keep.rownames = "sampleid")
     }) %>%
-      rbindlist(use.names = T, fill = TRUE) %>%
+      .rbindlist_typed(use.names = T, fill = TRUE) %>%
       {.[, lapply(.SD, function(x) {median(x, na.rm = T)}), keyby = c("sampleid")]} %>%
       {as.data.frame(., row.names = .$sampleid)}
 
@@ -1538,7 +1575,7 @@ run_AMOPLS <- function(datamatrix,
           {.[which(!names(.) %in% "residuals")]} %>% .[[y]] %>% .[["means.matrix_res"]] %>%
           as.data.table(keep.rownames = "sampleid")
       }) %>%
-        rbindlist(use.names = T, fill = TRUE) %>% {
+        .rbindlist_typed(use.names = T, fill = TRUE) %>% {
           .[, lapply(.SD, function(x) {median(x, na.rm = T)}), keyby = c("sampleid")]
           } %>% {
           as.data.frame(., row.names = .$sampleid)
@@ -1574,7 +1611,6 @@ run_AMOPLS <- function(datamatrix,
 }
 
 
-
 #' @title Score plot
 #' @description Score plot of the x-scores from AMOPLS results, according to the selected factor and components.
 #'
@@ -1584,12 +1620,12 @@ run_AMOPLS <- function(datamatrix,
 #' @inheritParams fun_outputs
 #'
 #' @return 2D score plot of the x-scores from AMOPLS results according to the 2 selected components. Every datapoint is colored according to its factor-level. Every color group is surrounded by a convex hull.
-#'
+#' #'
 #' @import ggplot2
 #' @import magrittr
 #' @import data.table
 #' @import ggpubr
-#'
+#' #'
 #' @references From grDevices chull
 #' @export
 fun_score_plot <- function(s, fact, t_1 = NULL, t_2 = NULL) {
@@ -1652,7 +1688,7 @@ fun_score_plot <- function(s, fact, t_1 = NULL, t_2 = NULL) {
 #' @import magrittr
 #' @import data.table
 #' @import ggpubr
-#'
+#' #'
 #' @export
 #'
 fun_plot_optimal_scores <- function(s) {
@@ -1822,7 +1858,6 @@ fun_plot_VIPs <- function(s, main_factor = NULL, VIP_nb = NULL, debugL = F) {
           legend.text = element_text(size = 11, hjust = 0.3, face = 'bold'))
 }
 
-
 #' Function to get RSS
 #'
 #' @inheritParams fun_outputs
@@ -1900,7 +1935,7 @@ fun_AMOPLS_summary <- function(s, type = c("All", "RSS", "RSR", "Permutation", "
                   fun_get_blockcontrib(.)
              )
            } %>% {
-             Reduce(function(x, y) {merge(x, y, by = c("Effect", "Effect Name"), all = T)}, .)
+             Reduce(function(x, y) {merge(x, y, on = c("Effect", "Effect Name"), all = T)}, .)
            }
          }
   )
@@ -2048,7 +2083,7 @@ MetStat.PCA.Calculate <- function (data) {
 #'
 #' @inheritParams base::solve
 #' @inheritParams kopls::koplsModel
-#'
+#' 
 koplsModel_custom <- function(K, Y, A, nox, preProcK = "mc", preProcY = "mc", tol = 1e-20) {
   if (!requireNamespace("kopls", quietly = TRUE)) {
     stop("Package \"kopls\" needed for this function to work. Please install it using install_kopls()",
@@ -2170,4 +2205,3 @@ koplsModel_custom <- function(K, Y, A, nox, preProcK = "mc", preProcY = "mc", to
 fun_get_summary <- function(s) {
   s$output$Summary %>% {.[s$general$ee.names]}
 }
-
