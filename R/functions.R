@@ -1,3 +1,27 @@
+﻿# ---------------------------------------------------------------------------
+# .rbindlist_typed -- data.table >= 1.18 rbindlist() is STRICT about column
+# types across list elements: if one draw yields an integer-valued column and
+# another a double, it errors ("Column N of result for group G is type 'integer'
+# but expecting type 'double'") instead of coercing as older data.table did.
+# rAMOPLS' permutation/subsampling assembly produces exactly that (some effects
+# come out integer for some draws), so every rbindlist() in this package is
+# routed through this wrapper, which coerces non-factor integer columns to
+# double before binding. Factors are preserved (they are integer-typed too).
+# Fix for MELIPOP-Orb / data.table 1.18.x, 2026-09-27.
+# ---------------------------------------------------------------------------
+.rbindlist_typed <- function(l, ...) {
+  if (is.data.frame(l)) return(rbindlist(l, ...))
+  l <- lapply(l, function(d) {
+    if (is.data.frame(d)) {
+      for (cc in names(d)) {
+        if (is.integer(d[[cc]]) && !is.factor(d[[cc]])) d[[cc]] <- as.numeric(d[[cc]])
+      }
+    }
+    d
+  })
+  rbindlist(l, ...)
+}
+
 utils::globalVariables(c("."))
 
 
@@ -739,7 +763,7 @@ fun_plot_ortho <- function(s) {
                "Ortho_nb" = x$general$Nb_compo_ortho,
                "Iteration" = x$output$Permutation_result$PermNb %>% unique())
   }) %>%
-    rbindlist(use.names = T, idcol = "rn") %>% {
+    .rbindlist_typed(use.names = T, idcol = "rn") %>% {
       ggplot(., aes(Ortho_nb, R2Y)) +
         geom_bar(stat = "identity", color = "black", fill = "grey") +
         theme_bw() +
@@ -1315,7 +1339,7 @@ run_AMOPLS <- function(datamatrix,
     }
 
     temp_dt <- temp %>%
-      rbindlist() %>%
+      .rbindlist_typed() %>%
       merge(., iter_template, on = "Iter")
 
     ## P-value calculation
@@ -1333,7 +1357,7 @@ run_AMOPLS <- function(datamatrix,
           output <- data.table(effect, effect_name, temp_subset)
           setnames(output, c("Effect", "Effect_name", paste0(x, "_pvalue")))
           return(output)
-        }) %>% rbindlist(use.names = T)
+        }) %>% .rbindlist_typed(use.names = T)
       }) %>% {Reduce(function(z, w) {merge(z, w, on = c("Effect", "Effect_name"))}, .)}
     })
 
@@ -1414,7 +1438,7 @@ run_AMOPLS <- function(datamatrix,
         # x <- temp_orthon[[1]]
         data.table("id" = rownames(x$general$factors), x$output$x_scores)
       }) %>%
-        rbindlist(use.names = T, fill = TRUE, idcol = "rn")
+        .rbindlist_typed(use.names = T, fill = TRUE, idcol = "rn")
       ## Check component correlation between each models
       scores_sign <- sapply(1:(ncol(output_scores)-2), function(x) {
         # x <- 1
@@ -1452,7 +1476,7 @@ run_AMOPLS <- function(datamatrix,
         # x <- temp_orthon[[1]]
         data.table("id" = colnames(x$general$data), x$output$x_loadings)
       }) %>%
-        rbindlist(use.names = T, fill = TRUE, idcol = "rn")
+        .rbindlist_typed(use.names = T, fill = TRUE, idcol = "rn")
       ## Check component correlation between each models
       loadings_sign <- sapply(1:(ncol(output_loadings)-2), function(x) {
         # x <- 1
@@ -1482,7 +1506,7 @@ run_AMOPLS <- function(datamatrix,
       # x <- temp_orthon[[3]]
       data.table("id" = c(x$general$factor_names[x$general$order.to.evaluate.ee], "residual"), x$output$block_saliences_norm)
     }) %>%
-      rbindlist(use.names = T, fill = TRUE) %>%
+      .rbindlist_typed(use.names = T, fill = TRUE) %>%
       {.[, lapply(.SD, median), keyby = "id"]} %>%
       as.matrix(rownames = "id")
 
@@ -1490,28 +1514,28 @@ run_AMOPLS <- function(datamatrix,
       # x <- temp_orthon[[3]]
       x$output$RSS
     }) %>%
-      rbindlist(use.names = T, fill = TRUE) %>%
+      .rbindlist_typed(use.names = T, fill = TRUE) %>%
       {.[, lapply(.SD, median), keyby = c("Effect", "Effect Name")]}
 
     output_RSR <- lapply(temp_orthon, function(x) {
       # x <- temp_orthon[[3]]
       x$output$RSR
     }) %>%
-      rbindlist(use.names = T, fill = TRUE) %>%
+      .rbindlist_typed(use.names = T, fill = TRUE) %>%
       {.[, lapply(.SD, median), keyby = c("Effect", "Effect Name")]}
 
     output_SSQ <- lapply(temp_orthon, function(x) {
       # x <- temp_orthon[[3]]
       x$output$SSQ
     }) %>%
-      rbindlist(use.names = T, fill = TRUE) %>%
+      .rbindlist_typed(use.names = T, fill = TRUE) %>%
       {.[, lapply(.SD, median)]}
 
     output_Perm <- lapply(temp_orthon, function(x) {
       # x <- temp_orthon[[3]]
       x$output$Permutation_result$summary
     }) %>%
-      rbindlist(use.names = T, fill = TRUE) %>%
+      .rbindlist_typed(use.names = T, fill = TRUE) %>%
       {.[, lapply(.SD, median), keyby = c("Effect", "Effect Name")]}
 
     output_R2Y <- sapply(temp_orthon, function(x) {
@@ -1524,14 +1548,14 @@ run_AMOPLS <- function(datamatrix,
       # x <- temp_orthon[[1]]
       x$output$VIP
     }) %>%
-      rbindlist(use.names = T, fill = TRUE) %>%
+      .rbindlist_typed(use.names = T, fill = TRUE) %>%
       {.[, lapply(.SD, median), keyby = c("id")]}
 
     output_Summary <- lapply(temp_orthon, function(x) {
       # x <- temp_orthon[[1]]
       x$output$Summary
     }) %>%
-      rbindlist(use.names = T, fill = TRUE) %>%
+      .rbindlist_typed(use.names = T, fill = TRUE) %>%
       {.[, lapply(.SD, function(x) {median(x, na.rm = T)}), keyby = c("Effect", "Effect Name")]}
 
     #### DEV
@@ -1539,7 +1563,7 @@ run_AMOPLS <- function(datamatrix,
       # x <- temp_orthon[[1]]
       x$decompo_ANOVA$residuals %>% as.data.table(keep.rownames = "sampleid")
     }) %>%
-      rbindlist(use.names = T, fill = TRUE) %>%
+      .rbindlist_typed(use.names = T, fill = TRUE) %>%
       {.[, lapply(.SD, function(x) {median(x, na.rm = T)}), keyby = c("sampleid")]} %>%
       {as.data.frame(., row.names = .$sampleid)}
 
@@ -1551,7 +1575,7 @@ run_AMOPLS <- function(datamatrix,
           {.[which(!names(.) %in% "residuals")]} %>% .[[y]] %>% .[["means.matrix_res"]] %>%
           as.data.table(keep.rownames = "sampleid")
       }) %>%
-        rbindlist(use.names = T, fill = TRUE) %>% {
+        .rbindlist_typed(use.names = T, fill = TRUE) %>% {
           .[, lapply(.SD, function(x) {median(x, na.rm = T)}), keyby = c("sampleid")]
           } %>% {
           as.data.frame(., row.names = .$sampleid)
